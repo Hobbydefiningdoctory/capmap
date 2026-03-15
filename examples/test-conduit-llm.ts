@@ -4,21 +4,23 @@ import { matchWithLLM } from '../src/matcher'
 
 const config = require('../conduit.config.js')
 
-const apiKey = process.env.DEEPSEEK_API_KEY
-if (!apiKey) {
-  console.error('Missing DEEPSEEK_API_KEY — add it to your Replit Secrets.')
+const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+const apiKey  = process.env.AI_INTEGRATIONS_OPENAI_API_KEY
+
+if (!baseUrl || !apiKey) {
+  console.error('Missing Replit AI integration env vars. Run setupReplitAIIntegrations first.')
   process.exit(1)
 }
 
-async function deepseekLLM(prompt: string): Promise<string> {
-  const response = await fetch('https://api.deepseek.com/chat/completions', {
+async function replitLLM(prompt: string): Promise<string> {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'deepseek-chat',
+      model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0,
     }),
@@ -26,7 +28,7 @@ async function deepseekLLM(prompt: string): Promise<string> {
 
   if (!response.ok) {
     const err = await response.text()
-    throw new Error(`DeepSeek API error ${response.status}: ${err}`)
+    throw new Error(`AI API error ${response.status}: ${err}`)
   }
 
   const data = await response.json() as {
@@ -45,11 +47,11 @@ async function main() {
   }
 
   console.log(`\n✓ Manifest valid — ${manifest.capabilities.length} capabilities`)
-  console.log('  Model: deepseek-chat\n')
+  console.log('  Model: gpt-4o-mini (Replit AI)\n')
   console.log('─'.repeat(60))
 
   const queries = [
-    // Previously vague — LLM should handle these
+    // Previously vague — LLM should handle these well
     'What is everyone writing about?',
     'I want to read something',
     'Who is techwriter42?',
@@ -74,7 +76,7 @@ async function main() {
   for (const query of queries) {
     process.stdout.write(`\n  ⋯  "${query}"\n`)
 
-    const result = await matchWithLLM(query, manifest, { llm: deepseekLLM })
+    const result = await matchWithLLM(query, manifest, { llm: replitLLM })
 
     const status = result.capability ? '✓' : '○'
     const name   = result.capability ? result.capability.id : 'OUT_OF_SCOPE'
