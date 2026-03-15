@@ -65,9 +65,14 @@ export async function ask(
 ): Promise<AskResult> {
   const { llm, ...resolveOptions } = options
 
-  const matchResult = llm
-    ? await _matchWithLLM(query, manifest, { llm })
-    : _match(query, manifest)
+  // Tier 1 — try keyword matcher first (fast, no API call)
+  const keywordResult = _match(query, manifest)
+
+  // If confident enough, use it directly
+  const THRESHOLD = 50
+  const matchResult = (keywordResult.confidence >= THRESHOLD || !llm)
+    ? keywordResult
+    : await _matchWithLLM(query, manifest, { llm })
 
   const resolution = await _resolve(
     matchResult,
