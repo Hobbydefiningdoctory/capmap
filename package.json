@@ -10,7 +10,7 @@
   "scripts": {
     "build":    "tsc",
     "dev":      "tsc --watch",
-    "example":  "ts-node examples/basic.ts",
+    "example":  "tsx examples/basic.ts",
     "validate": "node bin/capman.js validate",
     "inspect":  "node bin/capman.js inspect"
   },
@@ -22,5 +22,11 @@
     "navigation",
     "llm"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "~5.9.2",
+    "prettier": "^3.8.1",
+    "@types/node": "catalog:",
+    "tsx": "catalog:"
+  }
 }
