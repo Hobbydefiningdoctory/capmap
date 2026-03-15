@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { generate, validate } from '../src/index'
 import { matchWithLLM } from '../src/matcher'
 
-const config = require('../conduit.config.js')
+const config = require('./conduit.config.js')
 
 const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
 const apiKey  = process.env.AI_INTEGRATIONS_OPENAI_API_KEY

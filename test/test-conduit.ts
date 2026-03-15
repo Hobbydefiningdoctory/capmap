@@ -1,7 +1,7 @@
 import { generate, match, validate } from '../src/index'
 
 // Load the conduit config manually
-const config = require('../conduit.config.js')
+const config = require('./conduit.config.js')
 
 // Generate manifest
 const manifest = generate(config)
