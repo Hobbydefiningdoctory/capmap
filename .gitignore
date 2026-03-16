@@ -1,52 +1,33 @@
-# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
-
-# compiled output
-dist
-tmp
-out-tsc
+# Compiled output
+dist/
 *.tsbuildinfo
-.expo
-.expo-shared
 
-# dependencies
-node_modules
+# Dependencies
+node_modules/
 
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
+# Generated files (run `node bin/capman.js generate` to recreate)
+manifest.json
 
-# IDE - VSCode
+# Environment variables — never commit real keys
+.env
+
+# Replit internals
+.cache/
+.local/
+.replit
+.replitignore
+
+# pnpm / monorepo internals
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
+# macOS
+.DS_Store
+
+# IDEs
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
-
-# misc
-/.sass-cache
-/connect.lock
-/coverage
-/libpeerconnection.log
-npm-debug.log
-yarn-error.log
-testem.log
-/typings
-
-# System Files
-.DS_Store
-Thumbs.db
-
-.cursor/rules/nx-rules.mdc
-.github/instructions/nx.instructions.md
-
-# Replit
-.cache/
-.local/
-
-# Environment variables
-.env
+.idea/
