@@ -1,24 +1,52 @@
 import type { Capability, Manifest, MatchResult } from './types'
 
+const STOPWORDS = new Set([
+  'show', 'me', 'the', 'get', 'find', 'fetch', 'give', 'please',
+  'can', 'you', 'i', 'want', 'to', 'a', 'an', 'my', 'our', 'your',
+  'what', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+  'could', 'should', 'may', 'might', 'shall', 'and', 'or', 'but',
+  'in', 'on', 'at', 'by', 'for', 'with', 'about', 'into', 'through',
+  'of', 'from', 'up', 'out', 'that', 'this', 'these', 'those',
+  'it', 'its', 'how', 'when', 'where', 'who', 'which', 'all',
+  'just', 'some', 'any', 'there', 'their', 'them', 'they',
+])
+
+function filterStopwords(words: string[]): string[] {
+  return words.filter(w => !STOPWORDS.has(w.toLowerCase()) && w.length > 1)
+}
+
 function scoreCapability(query: string, cap: Capability): number {
   const q = query.toLowerCase()
   let score = 0
 
+  const qWords = filterStopwords(q.split(/\W+/).filter(Boolean))
+
+  // Check examples — exact substring match is a strong signal
   for (const example of cap.examples ?? []) {
-    const exWords = example.toLowerCase().split(/\s+/)
-    const qWords  = q.split(/\s+/)
+    const exWords = filterStopwords(example.toLowerCase().split(/\s+/))
+    if (exWords.length === 0) continue
     const overlap = exWords.filter(w => qWords.includes(w)).length
     score += (overlap / exWords.length) * 60
   }
 
-  const descWords   = cap.description.toLowerCase().split(/\W+/).filter(Boolean)
-  const qWords      = q.split(/\W+/).filter(Boolean)
-  const descOverlap = descWords.filter(w => qWords.includes(w)).length
-  score += (descOverlap / Math.max(descWords.length, 1)) * 30
+  // Check description words
+  const descWords = filterStopwords(
+    cap.description.toLowerCase().split(/\W+/).filter(Boolean)
+  )
+  if (descWords.length > 0) {
+    const descOverlap = descWords.filter(w => qWords.includes(w)).length
+    score += (descOverlap / descWords.length) * 30
+  }
 
-  const nameWords   = cap.name.toLowerCase().split(/\W+/).filter(Boolean)
-  const nameOverlap = nameWords.filter(w => qWords.includes(w)).length
-  score += (nameOverlap / Math.max(nameWords.length, 1)) * 10
+  // Check name words
+  const nameWords = filterStopwords(
+    cap.name.toLowerCase().split(/\W+/).filter(Boolean)
+  )
+  if (nameWords.length > 0) {
+    const nameOverlap = nameWords.filter(w => qWords.includes(w)).length
+    score += (nameOverlap / nameWords.length) * 10
+  }
 
   return Math.min(Math.round(score), 100)
 }
