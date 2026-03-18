@@ -14,11 +14,11 @@
     "CONTRIBUTING.md"
   ],
   "scripts": {
-    "build":    "tsc",
-    "dev":      "tsc --watch",
-    "example":  "tsx examples/basic.ts",
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "example": "tsx examples/basic.ts",
     "validate": "node bin/capman.js validate",
-    "inspect":  "node bin/capman.js inspect"
+    "inspect": "node bin/capman.js inspect"
   },
   "keywords": [
     "ai",
@@ -35,6 +35,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "dotenv": "^17.3.1"
+    "dotenv": "^17.3.1",
+    "zod": "catalog:"
   }
 }
