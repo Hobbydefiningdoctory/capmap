@@ -93,35 +93,34 @@ export function readManifest(manifestPath = 'manifest.json'): Manifest {
   return raw as Manifest
 }
 
+/**
+ * Validates a manifest for correctness.
+ * Returns errors (blocking) and warnings (non-blocking).
+ *
+ * @deprecated Internal validation now uses Zod via validateManifest().
+ * This function is kept for backwards compatibility and will delegate
+ * to Zod for error checking, while still producing warnings.
+ */
 export function validate(manifest: Manifest): ValidationResult {
   const errors: string[] = []
   const warnings: string[] = []
-  const ids = new Set<string>()
 
-  if (!manifest.app?.trim()) errors.push('manifest.app is required')
-  if (!Array.isArray(manifest.capabilities) || manifest.capabilities.length === 0) {
-    errors.push('manifest.capabilities must be a non-empty array')
-  }
+  // Delegate error checking to Zod
+  const zodResult = validateManifest(manifest)
+  errors.push(...zodResult.errors)
 
+  // Warnings that Zod doesn't cover
   for (const cap of manifest.capabilities ?? []) {
-    if (!cap.id)   errors.push(`A capability is missing an "id"`)
-    if (!cap.name) errors.push(`Capability "${cap.id}" is missing a "name"`)
-    if (!cap.description || cap.description.length < 10)
-      errors.push(`Capability "${cap.id}" needs a longer description (min 10 chars)`)
-    if (!cap.resolver) errors.push(`Capability "${cap.id}" is missing a "resolver"`)
-    if (!cap.privacy)  errors.push(`Capability "${cap.id}" is missing a "privacy" scope`)
-
-    if (ids.has(cap.id)) errors.push(`Duplicate capability id: "${cap.id}"`)
-    ids.add(cap.id)
-
-    if (!cap.examples?.length)
-      warnings.push(`Capability "${cap.id}" has no examples — adding examples improves matching`)
-
-    if (cap.resolver?.type === 'api' && !cap.resolver.endpoints?.length)
-      errors.push(`Capability "${cap.id}" has an api resolver but no endpoints`)
-
-    if (cap.resolver?.type === 'nav' && !cap.resolver.destination)
-      errors.push(`Capability "${cap.id}" has a nav resolver but no destination`)
+    if (!cap.examples?.length) {
+      warnings.push(
+        `Capability "${cap.id}" has no examples — adding examples improves matching`
+      )
+    }
+    if (!cap.returns?.length) {
+      warnings.push(
+        `Capability "${cap.id}" has no "returns" declaration`
+      )
+    }
   }
 
   return { valid: errors.length === 0, errors, warnings }

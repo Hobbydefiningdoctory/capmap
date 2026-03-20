@@ -217,6 +217,71 @@ describe('resolve()', () => {
       })
       expect(result.success).toBe(true)
     })
+
+    it('injects auth.userId into session params', async () => {
+      const sessionConfig: CapmanConfig = {
+        app: 'test-app',
+        capabilities: [{
+          id: 'get_my_orders',
+          name: 'Get my orders',
+          description: 'Fetch orders belonging to the authenticated user.',
+          examples: ['show my orders'],
+          params: [
+            { name: 'user_id', description: 'User ID', required: true, source: 'session' }
+          ],
+          returns: ['orders'],
+          resolver: {
+            type: 'api',
+            endpoints: [{ method: 'GET', path: '/users/{user_id}/orders' }],
+          },
+          privacy: { level: 'user_owned' },
+        }],
+      }
+      const m = generate(sessionConfig)
+      const matchResult = match('show my orders', m)
+      const result = await resolve(matchResult, {}, {
+        baseUrl: 'https://api.test.com',
+        dryRun: true,
+        auth: { isAuthenticated: true, role: 'user', userId: 'user-42' },
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.apiCalls?.[0].url).toBe('https://api.test.com/users/user-42/orders')
+    })
+
+    it('handles missing auth.userId gracefully', async () => {
+      const sessionConfig: CapmanConfig = {
+        app: 'test-app',
+        capabilities: [{
+          id: 'get_my_orders',
+          name: 'Get my orders',
+          description: 'Fetch orders belonging to the authenticated user.',
+          examples: ['show my orders'],
+          params: [
+            { name: 'user_id', description: 'User ID', required: true, source: 'session' }
+          ],
+          returns: ['orders'],
+          resolver: {
+            type: 'api',
+            endpoints: [{ method: 'GET', path: '/users/{user_id}/orders' }],
+          },
+          privacy: { level: 'user_owned' },
+        }],
+      }
+      const m = generate(sessionConfig)
+      const matchResult = match('show my orders', m)
+      const result = await resolve(matchResult, {}, {
+        baseUrl: 'https://api.test.com',
+        dryRun: true,
+        auth: { isAuthenticated: true, role: 'user' }, // no userId
+      })
+
+      // Should still succeed — userId just won't be injected
+      expect(result.success).toBe(true)
+      expect(result.apiCalls?.[0].url).toBe('https://api.test.com/users/{user_id}/orders')
+    })
+    
   })
 
+  
 })

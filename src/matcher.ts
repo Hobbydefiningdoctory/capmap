@@ -60,6 +60,18 @@ function resolverToIntent(cap: Capability): MatchResult['intent'] {
   return 'out_of_scope'
 }
 
+
+/**
+ * Extracts parameter values from a user query using keyword heuristics.
+ *
+ * Known limits:
+ * - Extracts single tokens only — "jane smith" would extract "jane"
+ * - Keyword matching is positional — "articles from authors I follow"
+ *   may extract "authors" instead of nothing, since "from" is a keyword
+ * - For complex or ambiguous queries, use matchWithLLM() which handles
+ *   param extraction more accurately via the LLM prompt
+ */
+  
 function extractParams(query: string, cap: Capability): Record<string, string | null> {
   const result: Record<string, string | null> = {}
   const q = query.toLowerCase()
@@ -103,12 +115,7 @@ function extractParams(query: string, cap: Capability): Record<string, string | 
     // Fallback — grab last meaningful word in the query
     if (!extracted) {
       const words = query.trim().split(/\s+/)
-      const stopwords = new Set([
-        'show', 'me', 'the', 'get', 'find', 'fetch', 'give',
-        'what', 'is', 'are', 'a', 'an', 'my', 'i', 'want',
-        'to', 'please', 'can', 'you', 'open', 'take', 'go',
-      ])
-      const meaningful = words.filter(w => !stopwords.has(w.toLowerCase()))
+      const meaningful = words.filter(w => !STOPWORDS.has(w.toLowerCase()))
       extracted = meaningful[meaningful.length - 1] ?? null
     }
 

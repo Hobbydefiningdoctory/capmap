@@ -77,25 +77,38 @@ export async function resolve(
     }
   }
 
+  // ── Session param injection ───────────────────────────────────────────────
+  // Inject auth.userId into any params marked as source: 'session'
+  const enrichedParams = { ...params }
+  if (options.auth?.userId) {
+    for (const param of capability.params) {
+      if (param.source === 'session' && options.auth.userId) {
+        enrichedParams[param.name] = options.auth.userId
+        logger.debug(`Injected session param "${param.name}" = "${options.auth.userId}"`)
+      }
+    }
+  }
+
   const resolver = capability.resolver
   logger.info(`Resolving capability "${capability.id}" via ${resolver.type} resolver`)
   logger.debug(`Params: ${JSON.stringify(params)}`)
   logger.debug(`Options: baseUrl=${options.baseUrl} dryRun=${options.dryRun}`)
 
   try {
-    switch (resolver.type) {
-      case 'api':
-        return await resolveApi(resolver, params, options)
+        switch (resolver.type) {
+          case 'api':
+            return await resolveApi(resolver, enrichedParams, options)
 
-      case 'nav':
-        return resolveNav(resolver, params)
+          case 'nav':
+            return resolveNav(resolver, enrichedParams)
 
-      case 'hybrid': {
-        logger.debug('Hybrid resolver — running API and nav in parallel')
-        const [apiResult, navResult] = await Promise.all([
-          resolveApi(resolver.api as ApiResolver, params, options),
-          Promise.resolve(resolveNav(resolver.nav as NavResolver, params)),
-        ])
+          case 'hybrid': {
+            logger.debug('Hybrid resolver — running API and nav in parallel')
+            const [apiResult, navResult] = await Promise.all([
+              resolveApi(resolver.api as ApiResolver, enrichedParams, options),
+              Promise.resolve(resolveNav(resolver.nav as NavResolver, enrichedParams)),
+            ])
+            
         return {
           success: apiResult.success && navResult.success,
           resolverType: 'hybrid',
@@ -139,17 +152,37 @@ async function resolveApi(
     }
   }
 
-  await Promise.all(
-    apiCalls.map(c => fetchFn(c.url, {
-      method: c.method,
-      headers: options.headers ?? {},
-      body: ['POST', 'PUT', 'PATCH'].includes(c.method)
-        ? JSON.stringify(c.params)
-        : undefined,
-    }))
-  )
+  try {
+    const responses = await Promise.all(
+      apiCalls.map(c => fetchFn(c.url, {
+        method: c.method,
+        headers: options.headers ?? {},
+        body: ['POST', 'PUT', 'PATCH'].includes(c.method)
+          ? JSON.stringify(c.params)
+          : undefined,
+      }))
+    )
 
-  return { success: true, resolverType: 'api', apiCalls }
+    // Check for HTTP errors
+    const failed = responses.find(r => !r.ok)
+    if (failed) {
+      return {
+        success: false,
+        resolverType: 'api',
+        apiCalls,
+        error: `API request failed: ${failed.status} ${failed.statusText}`,
+      }
+    }
+
+    return { success: true, resolverType: 'api', apiCalls }
+  } catch (err) {
+    return {
+      success: false,
+      resolverType: 'api',
+      apiCalls,
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
 }
 
 function resolveNav(
