@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { CapmanConfig, Manifest, ValidationResult } from './types'
 import { validateConfig, validateManifest } from './schema'
+import { logger } from './logger'
 
 export function generate(config: CapmanConfig): Manifest {
   return {
@@ -93,14 +94,6 @@ export function readManifest(manifestPath = 'manifest.json'): Manifest {
   return raw as Manifest
 }
 
-/**
- * Validates a manifest for correctness.
- * Returns errors (blocking) and warnings (non-blocking).
- *
- * @deprecated Internal validation now uses Zod via validateManifest().
- * This function is kept for backwards compatibility and will delegate
- * to Zod for error checking, while still producing warnings.
- */
 export function validate(manifest: Manifest): ValidationResult {
   const errors: string[] = []
   const warnings: string[] = []
@@ -112,20 +105,24 @@ export function validate(manifest: Manifest): ValidationResult {
   // Warnings that Zod doesn't cover
   for (const cap of manifest.capabilities ?? []) {
     if (!cap.examples?.length) {
-      warnings.push(
-        `Capability "${cap.id}" has no examples — adding examples improves matching`
-      )
+      const msg = `Capability "${cap.id}" has no examples — adding examples improves matching`
+      warnings.push(msg)
+      logger.warn(msg)
     }
     if (!cap.returns?.length) {
-      warnings.push(
-        `Capability "${cap.id}" has no "returns" declaration`
-      )
+      const msg = `Capability "${cap.id}" has no "returns" declaration`
+      warnings.push(msg)
+      logger.warn(msg)
     }
+  }
+
+  if (errors.length > 0) {
+    logger.error(`Manifest validation failed — ${errors.length} error(s)`)
+    errors.forEach(e => logger.error(e))
   }
 
   return { valid: errors.length === 0, errors, warnings }
 }
-
 export function generateStarterConfig(): string {
   return `// capman.config.js 
 // Define what your app can do for AI agents.

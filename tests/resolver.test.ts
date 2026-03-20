@@ -244,7 +244,6 @@ describe('resolve()', () => {
         dryRun: true,
         auth: { isAuthenticated: true, role: 'user', userId: 'user-42' },
       })
-
       expect(result.success).toBe(true)
       expect(result.apiCalls?.[0].url).toBe('https://api.test.com/users/user-42/orders')
     })
@@ -273,15 +272,64 @@ describe('resolve()', () => {
       const result = await resolve(matchResult, {}, {
         baseUrl: 'https://api.test.com',
         dryRun: true,
-        auth: { isAuthenticated: true, role: 'user' }, // no userId
+        auth: { isAuthenticated: true, role: 'user' },
       })
-
-      // Should still succeed — userId just won't be injected
       expect(result.success).toBe(true)
       expect(result.apiCalls?.[0].url).toBe('https://api.test.com/users/{user_id}/orders')
     })
-    
   })
 
-  
+  describe('Fetch error handling', () => {
+    it('returns failure when fetch throws a network error', async () => {
+      const matchResult = match('Find resource by ID', manifest)
+      const result = await resolve(
+        matchResult,
+        { resource_id: '42' },
+        {
+          baseUrl: 'https://api.test.com',
+          fetch: async () => {
+            throw new Error('Network error: connection refused')
+          },
+        }
+      )
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Network error')
+    })
+
+    it('returns failure when API returns non-ok status', async () => {
+      const matchResult = match('Find resource by ID', manifest)
+      const result = await resolve(
+        matchResult,
+        { resource_id: '42' },
+        {
+          baseUrl: 'https://api.test.com',
+          fetch: async () => ({
+            ok: false,
+            status: 404,
+            statusText: 'Not Found',
+          } as Response),
+        }
+      )
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('404')
+    })
+
+    it('returns success when API returns ok status', async () => {
+      const matchResult = match('Find resource by ID', manifest)
+      const result = await resolve(
+        matchResult,
+        { resource_id: '42' },
+        {
+          baseUrl: 'https://api.test.com',
+          fetch: async () => ({
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+          } as Response),
+        }
+      )
+      expect(result.success).toBe(true)
+    })
+  })
+
 })
