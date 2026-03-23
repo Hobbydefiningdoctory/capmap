@@ -7,7 +7,7 @@ import { logger } from './logger'
 
 export function generate(config: CapmanConfig): Manifest {
   return {
-    version: require('../package.json').version,
+    version: '0.1.0',
     app: config.app,
     generatedAt: new Date().toISOString(),
     capabilities: config.capabilities,

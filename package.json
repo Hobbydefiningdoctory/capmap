@@ -2,8 +2,16 @@
   "name": "capman",
   "version": "0.1.0",
   "description": "Capability Manifest Engine — let AI agents interact with your app without navigating the UI",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/cjs/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/cjs/index.d.ts"
+    }
+  },
   "bin": {
     "capman": "./bin/capman.js"
   },
@@ -14,12 +22,14 @@
     "CONTRIBUTING.md"
   ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "example": "tsx examples/basic.ts",
-    "validate": "node bin/capman.js validate",
-    "inspect": "node bin/capman.js inspect",
-    "test": "vitest run"
+    "build:cjs": "tsc --project tsconfig.json",
+    "build:esm": "tsc --project tsconfig.esm.json",
+    "build":     "pnpm run build:cjs && pnpm run build:esm",
+    "dev":       "tsc --watch",
+    "example":   "tsx examples/basic.ts",
+    "validate":  "node bin/capman.js validate",
+    "inspect":   "node bin/capman.js inspect",
+    "test":      "vitest run"
   },
   "keywords": [
     "ai",

@@ -39,14 +39,14 @@ function header() {
 }
 
 function requireSrc() {
-  const distPath = path.join(__dirname, '..', 'dist', 'index.js')
+  const distPath = path.join(__dirname, '..', 'dist', 'cjs', 'index.js')
   if (fs.existsSync(distPath)) return require(distPath)
 
   try {
     require('ts-node/register')
     return require(path.join(__dirname, '..', 'src', 'index.ts'))
   } catch {
-    log.error('Cannot find dist/. Run: npx tsc')
+    log.error('Cannot find dist/cjs/. Run: pnpm run build')
     process.exit(1)
   }
 }
