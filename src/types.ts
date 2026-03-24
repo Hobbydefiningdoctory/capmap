@@ -87,14 +87,25 @@ export interface MatchResult {
 
 // ─── Resolve Result ───────────────────────────────────────────────────────────
 
+export interface ApiCallResult {
+  method: string
+  url: string
+  params: Record<string, unknown>
+  /** HTTP status code — only present when actually executed (not dry run) */
+  status?: number
+  /** Parsed JSON response body — only present when actually executed */
+  data?: unknown
+}
+
 export interface ResolveResult {
   success: boolean
   resolverType: ResolverType | null
-  apiCalls?: Array<{ method: string; url: string; params: Record<string, unknown> }>
+  apiCalls?: ApiCallResult[]
   navTarget?: string
+  /** Execution time in milliseconds */
+  durationMs?: number
   error?: string
 }
-
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 export interface ValidationResult {

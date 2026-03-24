@@ -32,8 +32,9 @@ const log = {
 }
 
 function header() {
+  const pkg = require(path.join(__dirname, '..', 'package.json'))
   console.log()
-  console.log(`${c.bold}${c.teal}  capman${c.reset} ${c.gray}v0.1.0 — Capability Manifest Engine${c.reset}`)
+  console.log(`${c.bold}${c.teal}  capman${c.reset} ${c.gray}v${pkg.version} — Capability Manifest Engine${c.reset}`)
   console.log(`${c.gray}  ─────────────────────────────────────────${c.reset}`)
   console.log()
 }
@@ -60,6 +61,7 @@ function cmdHelp() {
   console.log(`    ${c.teal}generate${c.reset}  Generate manifest.json from config`)
   console.log(`    ${c.teal}validate${c.reset}  Validate an existing manifest.json`)
   console.log(`    ${c.teal}inspect${c.reset}   Print all capabilities in manifest`)
+  console.log(`    ${c.teal}demo${c.reset}      Run a live demo with sample queries`)
   console.log()
   console.log(`${c.bold}  Options:${c.reset}`)
   console.log(`    ${c.gray}--config    Path to config file  (default: capman.config.js)${c.reset}`)
@@ -176,11 +178,147 @@ function cmdInspect() {
   }
 }
 
+function cmdDemo() {
+  header()
+  const { generate, match, resolve } = requireSrc()
+
+  console.log(`${c.bold}  Live demo — see capman in action${c.reset}`)
+  console.log(`${c.gray}  ─────────────────────────────────────────${c.reset}\n`)
+
+  // Demo manifest — generic e-commerce app
+  const config = {
+    app: 'demo-store',
+    baseUrl: 'https://api.demo-store.com',
+    capabilities: [
+      {
+        id: 'check_product_availability',
+        name: 'Check product availability',
+        description: 'Check stock and pricing for a product by name or ID.',
+        examples: [
+          'Is the blue jacket in stock?',
+          'Check stock for blue jacket',
+          'Do you have size M available?',
+          'Product availability for jacket',
+          'Is jacket available?',
+        ],
+        params: [
+          { name: 'product', description: 'Product name or ID', required: true, source: 'user_query' }
+        ],
+        returns: ['stock', 'price', 'variants'],
+        resolver: { type: 'api', endpoints: [{ method: 'GET', path: '/products/{product}/availability' }] },
+        privacy: { level: 'public' },
+      },
+      {
+        id: 'get_order_status',
+        name: 'Get order status',
+        description: 'Retrieve the current status and tracking info for an order.',
+        examples: [
+          'Where is my order?',
+          'Track order 1234',
+          'What is the status of my recent purchase?',
+        ],
+        params: [
+          { name: 'order_id', description: 'Order ID', required: true, source: 'user_query' }
+        ],
+        returns: ['status', 'tracking', 'estimated_delivery'],
+        resolver: { type: 'api', endpoints: [{ method: 'GET', path: '/orders/{order_id}' }] },
+        privacy: { level: 'user_owned' },
+      },
+      {
+        id: 'navigate_to_screen',
+        name: 'Navigate to screen',
+        description: 'Route the user to a specific page in the store.',
+        examples: [
+          'Take me to my cart',
+          'Open checkout',
+          'Go to my account',
+          'Show me the homepage',
+        ],
+        params: [
+          { name: 'destination', description: 'Target screen', required: true, source: 'user_query' }
+        ],
+        returns: ['deep_link'],
+        resolver: { type: 'nav', destination: '/{destination}' },
+        privacy: { level: 'public' },
+      },
+    ],
+  }
+
+  const manifest = generate(config)
+
+  const queries = [
+    'Check availability for blue jacket',
+    'Track order 1234',
+    'Take me to my cart',
+    'Is the website down?',
+  ]
+
+  console.log(`${c.gray}  App: ${c.reset}${c.bold}${config.app}${c.reset}`)
+  console.log(`${c.gray}  Capabilities: ${c.reset}${manifest.capabilities.length}`)
+  console.log(`${c.gray}  Mode: keyword matcher (no LLM required)\n${c.reset}`)
+
+  let passed = 0
+  let outOfScope = 0
+
+  for (const query of queries) {
+    const start = Date.now()
+    const result = match(query, manifest)
+    const duration = Date.now() - start
+
+    if (result.capability) {
+      passed++
+      const resolverColor = result.capability.resolver.type === 'api' ? c.teal :
+                            result.capability.resolver.type === 'nav' ? c.teal : c.yellow
+
+      console.log(`  ${c.green}✓${c.reset}  ${c.bold}"${query}"${c.reset}`)
+      console.log(`     ${c.gray}→ matched:${c.reset}    ${resolverColor}${result.capability.id}${c.reset}`)
+      console.log(`     ${c.gray}→ intent:${c.reset}     ${result.intent}`)
+      console.log(`     ${c.gray}→ confidence:${c.reset} ${result.confidence}%`)
+
+      if (Object.keys(result.extractedParams).length > 0) {
+        const params = Object.entries(result.extractedParams)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(', ')
+        console.log(`     ${c.gray}→ params:${c.reset}     ${params}`)
+      }
+
+      // Show what API call would be made
+      if (result.capability.resolver.type === 'api') {
+        const endpoint = result.capability.resolver.endpoints[0]
+        let path = endpoint.path
+        for (const [k, v] of Object.entries(result.extractedParams)) {
+          if (v) path = path.replace(`{${k}}`, v)
+        }
+        console.log(`     ${c.gray}→ api call:${c.reset}   ${endpoint.method} ${config.baseUrl}${path}`)
+      } else if (result.capability.resolver.type === 'nav') {
+        let dest = result.capability.resolver.destination
+        for (const [k, v] of Object.entries(result.extractedParams)) {
+          if (v) dest = dest.replace(`{${k}}`, v)
+        }
+        console.log(`     ${c.gray}→ nav target:${c.reset}  ${dest}`)
+      }
+
+      console.log(`     ${c.gray}→ time:${c.reset}       ${duration}ms\n`)
+    } else {
+      outOfScope++
+      console.log(`  ${c.yellow}○${c.reset}  ${c.bold}"${query}"${c.reset}`)
+      console.log(`     ${c.gray}→ out of scope — no capability handles this\n${c.reset}`)
+    }
+  }
+
+  console.log(`${c.gray}  ─────────────────────────────────────────${c.reset}`)
+  console.log(`  ${c.green}${passed} matched${c.reset}  ${c.gray}·${c.reset}  ${c.yellow}${outOfScope} out of scope${c.reset}  ${c.gray}·${c.reset}  ${manifest.capabilities.length} capabilities\n`)
+  console.log(`  ${c.gray}Try it on your own app:${c.reset}`)
+  console.log(`  ${c.teal}npx capman init${c.reset}  ${c.gray}→ create your manifest${c.reset}`)
+  console.log(`  ${c.teal}npx capman generate${c.reset}  ${c.gray}→ generate manifest.json${c.reset}\n`)
+}
+
 switch (command) {
   case 'init':     cmdInit();     break
   case 'generate': cmdGenerate(); break
   case 'validate': cmdValidate(); break
   case 'inspect':  cmdInspect();  break
+  case 'demo':     cmdDemo();     break
   case undefined:
   case '--help':
   case '-h':       cmdHelp();     break

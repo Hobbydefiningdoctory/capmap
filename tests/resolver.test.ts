@@ -294,6 +294,7 @@ describe('resolve()', () => {
       )
       expect(result.success).toBe(false)
       expect(result.error).toContain('Network error')
+      expect(result.durationMs).toBeDefined()
     })
 
     it('returns failure when API returns non-ok status', async () => {
@@ -312,9 +313,10 @@ describe('resolve()', () => {
       )
       expect(result.success).toBe(false)
       expect(result.error).toContain('404')
+      expect(result.durationMs).toBeDefined()
     })
 
-    it('returns success when API returns ok status', async () => {
+    it('returns success with status and data when API returns ok', async () => {
       const matchResult = match('Find resource by ID', manifest)
       const result = await resolve(
         matchResult,
@@ -325,10 +327,14 @@ describe('resolve()', () => {
             ok: true,
             status: 200,
             statusText: 'OK',
+            text: async () => JSON.stringify({ id: '42', name: 'Test Resource' }),
           } as Response),
         }
       )
       expect(result.success).toBe(true)
+      expect(result.durationMs).toBeDefined()
+      expect(result.apiCalls?.[0].status).toBe(200)
+      expect(result.apiCalls?.[0].data).toEqual({ id: '42', name: 'Test Resource' })
     })
   })
 

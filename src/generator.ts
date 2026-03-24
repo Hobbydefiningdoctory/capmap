@@ -1,4 +1,4 @@
-
+import { VERSION } from './version'
 import * as fs from 'fs'
 import * as path from 'path'
 import type { CapmanConfig, Manifest, ValidationResult } from './types'
@@ -7,7 +7,7 @@ import { logger } from './logger'
 
 export function generate(config: CapmanConfig): Manifest {
   return {
-    version: '0.2.0',
+    version: VERSION,
     app: config.app,
     generatedAt: new Date().toISOString(),
     capabilities: config.capabilities,

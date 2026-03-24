@@ -1,5 +1,5 @@
-import type { MatchResult, ResolveResult, ApiResolver, NavResolver } from './types'
 import { logger } from './logger'
+import type { MatchResult, ResolveResult, ApiResolver, NavResolver, ApiCallResult } from './types'
 
 // ─── Privacy enforcement ──────────────────────────────────────────────────────
 
@@ -127,19 +127,28 @@ export async function resolve(
     }
   }
 }
+
+
 async function resolveApi(
   resolver: ApiResolver | Omit<ApiResolver, 'type'>,
   params: Record<string, unknown>,
   options: ResolveOptions
 ): Promise<ResolveResult> {
-  const apiCalls = resolver.endpoints.map(endpoint => ({
+  const startTime = Date.now()
+
+  const apiCalls: ApiCallResult[] = resolver.endpoints.map(endpoint => ({
     method: endpoint.method,
     url: buildUrl(options.baseUrl ?? '', endpoint.path, params),
     params,
   }))
 
   if (options.dryRun) {
-    return { success: true, resolverType: 'api', apiCalls }
+    return {
+      success: true,
+      resolverType: 'api',
+      apiCalls,
+      durationMs: Date.now() - startTime,
+    }
   }
 
   const fetchFn = options.fetch ?? globalThis.fetch
@@ -148,6 +157,7 @@ async function resolveApi(
       success: true,
       resolverType: 'api',
       apiCalls,
+      durationMs: Date.now() - startTime,
       error: 'No fetch available — returning call plan only',
     }
   }
@@ -164,22 +174,50 @@ async function resolveApi(
     )
 
     // Check for HTTP errors
-    const failed = responses.find(r => !r.ok)
-    if (failed) {
+    const failedIdx = responses.findIndex(r => !r.ok)
+    if (failedIdx !== -1) {
+      const failed = responses[failedIdx]
       return {
         success: false,
         resolverType: 'api',
         apiCalls,
+        durationMs: Date.now() - startTime,
         error: `API request failed: ${failed.status} ${failed.statusText}`,
       }
     }
 
-    return { success: true, resolverType: 'api', apiCalls }
+    // Parse response bodies
+    const enrichedCalls = await Promise.all(
+      responses.map(async (res, i) => {
+        let data: unknown = undefined
+        try {
+          const text = await res.text()
+          data = text ? JSON.parse(text) : undefined
+        } catch {
+          // Non-JSON response — leave data undefined
+        }
+        return {
+          ...apiCalls[i],
+          status: res.status,
+          data,
+        }
+      })
+    )
+
+    logger.debug(`API calls completed in ${Date.now() - startTime}ms`)
+
+    return {
+      success: true,
+      resolverType: 'api',
+      apiCalls: enrichedCalls,
+      durationMs: Date.now() - startTime,
+    }
   } catch (err) {
     return {
       success: false,
       resolverType: 'api',
       apiCalls,
+      durationMs: Date.now() - startTime,
       error: err instanceof Error ? err.message : String(err),
     }
   }

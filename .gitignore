@@ -31,3 +31,6 @@ pnpm-workspace.yaml
 !.vscode/launch.json
 !.vscode/extensions.json
 .idea/
+
+# Auto-generated
+src/version.ts

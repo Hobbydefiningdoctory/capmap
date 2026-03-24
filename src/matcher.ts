@@ -92,21 +92,46 @@ function extractParams(query: string, cap: Capability): Record<string, string | 
     // e.g. "profile for johndoe" → johndoe
     //      "articles by jane"   → jane
     //      "tag javascript"     → javascript
+    // Use param name and description as hints for what to look for
+    const paramHints = [param.name, ...param.description.toLowerCase().split(/\s+/)]
+      .filter(w => w.length > 2)
+
+    // Try keyword-based extraction first
     const keywords = [
       `for `, `by `, `about `, `named `, `called `,
       `tag `, `user `, `author `, `slug `, `id `,
-      `to `, `from `, `with `,
+      `from `, `with `,
     ]
+
+    // For nav params — look for destination after navigation verbs
+    const navKeywords = [`to `, `open `, `show `]
+    const isNavParam = param.name === 'destination' ||
+      param.description.toLowerCase().includes('screen') ||
+      param.description.toLowerCase().includes('page')
+
+    const activeKeywords = isNavParam
+      ? [...navKeywords, ...keywords]
+      : keywords
 
     let extracted: string | null = null
 
-    for (const kw of keywords) {
+    for (const kw of activeKeywords) {
       const idx = q.indexOf(kw)
       if (idx !== -1) {
         const after = query.slice(idx + kw.length).trim()
-        const token = after.split(/\s+/)[0]
-        if (token && token.length > 1) {
-          extracted = token.replace(/[^a-zA-Z0-9-_@.]/g, '')
+        // Get remaining words, filter stopwords, take first meaningful one
+        const tokens = after.split(/\s+/)
+          .map(t => t.replace(/[^a-zA-Z0-9-_@.]/g, ''))
+          .filter(t => t.length > 1 && !STOPWORDS.has(t.toLowerCase()))
+
+        if (tokens.length > 0) {
+          // For IDs and numbers — single token is correct
+          const isIdParam = param.name.includes('id') ||
+            param.description.toLowerCase().includes('id') ||
+            param.description.toLowerCase().includes('number')
+
+          // For names, products, destinations — grab multi-word phrase
+          extracted = (isIdParam || isNavParam) ? tokens[0] : tokens.join('-').toLowerCase()
           break
         }
       }

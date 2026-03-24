@@ -9,6 +9,7 @@ export type {
   Manifest,
   MatchResult,
   ResolveResult,
+  ApiCallResult,
   ValidationResult,
   Resolver,
   ApiResolver,

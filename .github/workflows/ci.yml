@@ -31,5 +31,11 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      - name: Verify build output
+        run: |
+          test -f dist/cjs/index.js
+          test -f dist/esm/index.js
+          test -f dist/cjs/index.d.ts
+
       - name: Run tests
         run: pnpm test
