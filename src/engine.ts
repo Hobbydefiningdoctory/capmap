@@ -1,4 +1,4 @@
-import type { Manifest, MatchResult, ResolveResult } from './types'
+import type { Manifest, MatchResult, ResolveResult, ExecutionTrace } from './types'
 import type { LLMMatcherOptions } from './matcher'
 import type { ResolveOptions, AuthContext } from './resolver'
 import type { CacheStore } from './cache'
@@ -43,10 +43,10 @@ export interface EngineOptions {
 export interface EngineResult {
   match: MatchResult
   resolution: ResolveResult
-  /** How the match was resolved */
   resolvedVia: 'cache' | 'keyword' | 'llm'
-  /** Total time in milliseconds */
   durationMs: number
+  /** Full execution trace — always present */
+  trace: ExecutionTrace
 }
 
 // ─── CapmanEngine ─────────────────────────────────────────────────────────────
@@ -110,11 +110,23 @@ export class CapmanEngine {
           cached.result.extractedParams as Record<string, unknown>,
           this.resolveOptions(overrides)
         )
+        const cacheDurationMs = Date.now() - start
+        const cacheTrace: ExecutionTrace = {
+          query,
+          candidates: cached.result.candidates ?? [],
+          reasoning:  ['cache hit — skipped matching'],
+          steps: [
+            { type: 'cache_check', status: 'hit', durationMs: cacheDurationMs },
+          ],
+          resolvedVia: 'cache',
+          totalMs: cacheDurationMs,
+        }
         const result: EngineResult = {
           match: cached.result,
           resolution,
           resolvedVia: 'cache',
-          durationMs: Date.now() - start,
+          durationMs: cacheDurationMs,
+          trace: cacheTrace,
         }
         await this.recordLearning(query, cached.result, 'cache')
         return result
@@ -171,11 +183,30 @@ export class CapmanEngine {
     // ── Step 5: Record learning ──────────────────────────────────────────────
     await this.recordLearning(query, matchResult, resolvedVia)
 
+    const totalMs = Date.now() - start
+    const trace: ExecutionTrace = {
+      query,
+      candidates:  matchResult.candidates ?? [],
+      reasoning:   [matchResult.reasoning],
+      steps: [
+        { type: 'cache_check',    status: 'miss', durationMs: 0 },
+        { type: resolvedVia === 'llm' ? 'llm_match' : 'keyword_match',
+          status: matchResult.capability ? 'pass' : 'fail',
+          durationMs: totalMs,
+          detail: matchResult.reasoning,
+        },
+        { type: 'resolve', status: resolution.success ? 'pass' : 'fail', durationMs: 0 },
+      ],
+      resolvedVia,
+      totalMs,
+    }
+
     return {
       match: matchResult,
       resolution,
       resolvedVia,
-      durationMs: Date.now() - start,
+      durationMs: totalMs,
+      trace,
     }
   }
 

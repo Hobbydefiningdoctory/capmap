@@ -83,6 +83,8 @@ export interface MatchResult {
   intent: 'navigation' | 'retrieval' | 'hybrid' | 'out_of_scope'
   extractedParams: Record<string, string | null>
   reasoning: string
+  /** All scored candidates — used for trace */
+  candidates?: MatchCandidate[]
 }
 
 // ─── Resolve Result ───────────────────────────────────────────────────────────
@@ -112,4 +114,33 @@ export interface ValidationResult {
   valid: boolean
   errors: string[]
   warnings: string[]
+}
+
+// ─── Execution Trace ──────────────────────────────────────────────────────────
+
+export interface MatchCandidate {
+  capabilityId: string
+  score: number
+  matched: boolean
+}
+
+export interface TraceStep {
+  type: 'cache_check' | 'keyword_match' | 'llm_match' | 'privacy_check' | 'resolve'
+  status: 'hit' | 'miss' | 'pass' | 'fail' | 'skip'
+  durationMs: number
+  detail?: string
+}
+
+export interface ExecutionTrace {
+  query: string
+  /** All capabilities scored — not just the winner */
+  candidates: MatchCandidate[]
+  /** Why the winning capability was selected */
+  reasoning: string[]
+  /** Step-by-step execution breakdown */
+  steps: TraceStep[]
+  /** Which matcher was used */
+  resolvedVia: 'cache' | 'keyword' | 'llm'
+  /** Total duration */
+  totalMs: number
 }

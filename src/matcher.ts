@@ -170,14 +170,23 @@ export function match(query: string, manifest: Manifest): MatchResult {
   let best: Capability | null = null
   let bestScore = 0
 
+  const allScores: Array<{ cap: Capability; score: number }> = []
+
   for (const cap of manifest.capabilities) {
     const score = scoreCapability(query, cap)
     logger.debug(`  scored "${cap.id}": ${score}%`)
+    allScores.push({ cap, score })
     if (score > bestScore) {
       bestScore = score
       best = cap
     }
   }
+
+  const candidates = allScores.map(({ cap, score }) => ({
+    capabilityId: cap.id,
+    score,
+    matched: cap.id === best?.id,
+  }))
 
   if (!best || bestScore < 50) {
     logger.info(`No match above threshold (best: ${bestScore}% for "${best?.id ?? 'none'}")`)
@@ -187,6 +196,7 @@ export function match(query: string, manifest: Manifest): MatchResult {
       intent: 'out_of_scope',
       extractedParams: {},
       reasoning: `No capability matched with sufficient confidence (best score: ${bestScore})`,
+      candidates,
     }
   }
 
@@ -200,6 +210,7 @@ export function match(query: string, manifest: Manifest): MatchResult {
     intent: resolverToIntent(best),
     extractedParams: params,
     reasoning: `Matched "${best.id}" via keyword scoring (score: ${bestScore})`,
+    candidates,
   }
 }
 
