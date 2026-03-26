@@ -190,6 +190,7 @@ export function match(query: string, manifest: Manifest): MatchResult {
 
   if (!best || bestScore < 50) {
     logger.info(`No match above threshold (best: ${bestScore}% for "${best?.id ?? 'none'}")`)
+    // Out of scope return:
     return {
       capability: null,
       confidence: bestScore,
@@ -204,6 +205,7 @@ export function match(query: string, manifest: Manifest): MatchResult {
   logger.info(`Matched "${best.id}" at ${bestScore}% confidence`)
   logger.debug(`Extracted params: ${JSON.stringify(params)}`)
 
+  // Matched return:
   return {
     capability: best,
     confidence: bestScore,

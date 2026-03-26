@@ -1,4 +1,4 @@
-import type { Manifest, MatchResult, ResolveResult, ExecutionTrace } from './types'
+import type { Manifest, MatchResult, ResolveResult, ExecutionTrace, TraceStep } from './types'
 import type { LLMMatcherOptions } from './matcher'
 import type { ResolveOptions, AuthContext } from './resolver'
 import type { CacheStore } from './cache'
@@ -99,113 +99,162 @@ export class CapmanEngine {
    */
   async ask(query: string, overrides: Partial<ResolveOptions> = {}): Promise<EngineResult> {
     const start = Date.now()
+    const steps: TraceStep[] = []
+    let resolvedVia: EngineResult['resolvedVia'] = 'keyword'
 
     // ── Step 1: Check cache ──────────────────────────────────────────────────
+    const cacheStart = Date.now()
     if (this.cache) {
       const cached = await this.cache.get(query)
       if (cached) {
+        steps.push({ type: 'cache_check', status: 'hit', durationMs: Date.now() - cacheStart, detail: 'Served from cache' })
         logger.info(`Cache hit for: "${query}"`)
         const resolution = await _resolve(
           cached.result,
           cached.result.extractedParams as Record<string, unknown>,
           this.resolveOptions(overrides)
         )
-        const cacheDurationMs = Date.now() - start
-        const cacheTrace: ExecutionTrace = {
+        const trace: ExecutionTrace = {
           query,
           candidates: cached.result.candidates ?? [],
-          reasoning:  ['cache hit — skipped matching'],
-          steps: [
-            { type: 'cache_check', status: 'hit', durationMs: cacheDurationMs },
-          ],
+          reasoning: [`Served from cache (original: ${cached.result.reasoning})`],
+          steps,
           resolvedVia: 'cache',
-          totalMs: cacheDurationMs,
+          totalMs: Date.now() - start,
         }
         const result: EngineResult = {
           match: cached.result,
           resolution,
           resolvedVia: 'cache',
-          durationMs: cacheDurationMs,
-          trace: cacheTrace,
+          durationMs: Date.now() - start,
+          trace,
         }
         await this.recordLearning(query, cached.result, 'cache')
         return result
       }
+      steps.push({ type: 'cache_check', status: 'miss', durationMs: Date.now() - cacheStart })
+    } else {
+      steps.push({ type: 'cache_check', status: 'skip', durationMs: 0, detail: 'Cache disabled' })
     }
 
     // ── Step 2: Match ────────────────────────────────────────────────────────
     let matchResult: MatchResult
-    let resolvedVia: EngineResult['resolvedVia'] = 'keyword'
 
     switch (this.mode) {
       case 'cheap': {
+        const t = Date.now()
         matchResult = _match(query, this.manifest)
+        steps.push({ type: 'keyword_match', status: 'pass', durationMs: Date.now() - t, detail: `confidence: ${matchResult.confidence}%` })
         break
       }
 
       case 'accurate': {
         if (this.llm) {
-          matchResult  = await _matchWithLLM(query, this.manifest, { llm: this.llm })
-          resolvedVia  = 'llm'
+          const t = Date.now()
+          matchResult = await _matchWithLLM(query, this.manifest, { llm: this.llm })
+          resolvedVia = 'llm'
+          steps.push({ type: 'llm_match', status: 'pass', durationMs: Date.now() - t, detail: `confidence: ${matchResult.confidence}%` })
         } else {
           logger.warn('accurate mode requires llm — falling back to keyword')
+          const t = Date.now()
           matchResult = _match(query, this.manifest)
+          steps.push({ type: 'keyword_match', status: 'pass', durationMs: Date.now() - t, detail: 'llm not provided, used keyword' })
         }
         break
       }
 
       case 'balanced':
       default: {
+        const t1 = Date.now()
         const keywordResult = _match(query, this.manifest)
+        steps.push({ type: 'keyword_match', status: 'pass', durationMs: Date.now() - t1, detail: `confidence: ${keywordResult.confidence}%` })
+
         if (keywordResult.confidence >= this.threshold || !this.llm) {
           matchResult = keywordResult
         } else {
           logger.info(`Low confidence (${keywordResult.confidence}%) — escalating to LLM`)
+          const t2 = Date.now()
           matchResult = await _matchWithLLM(query, this.manifest, { llm: this.llm })
           resolvedVia = 'llm'
+          steps.push({ type: 'llm_match', status: 'pass', durationMs: Date.now() - t2, detail: `confidence: ${matchResult.confidence}%` })
         }
         break
       }
     }
 
-    // ── Step 3: Cache the match result ───────────────────────────────────────
+    // ── Step 3: Privacy check ────────────────────────────────────────────────
+    if (matchResult.capability) {
+      const privacyLevel = matchResult.capability.privacy.level
+      steps.push({
+        type: 'privacy_check',
+        status: 'pass',
+        durationMs: 0,
+        detail: `level: ${privacyLevel}`,
+      })
+    }
+
+    // ── Step 4: Cache the match result ───────────────────────────────────────
     if (this.cache && matchResult.capability) {
       await this.cache.set(query, matchResult)
     }
 
-    // ── Step 4: Resolve ──────────────────────────────────────────────────────
+    // ── Step 5: Resolve ──────────────────────────────────────────────────────
+    const resolveStart = Date.now()
     const resolution = await _resolve(
       matchResult,
       matchResult.extractedParams as Record<string, unknown>,
       this.resolveOptions(overrides)
     )
+    steps.push({
+      type: 'resolve',
+      status: resolution.success ? 'pass' : 'fail',
+      durationMs: Date.now() - resolveStart,
+      detail: resolution.error ?? `via ${resolution.resolverType}`,
+    })
 
-    // ── Step 5: Record learning ──────────────────────────────────────────────
+    // ── Step 6: Build reasoning array ────────────────────────────────────────
+    const reasoning: string[] = []
+    if (matchResult.candidates?.length) {
+      const winner = matchResult.candidates.find(c => c.matched)
+      const rejected = matchResult.candidates
+        .filter(c => !c.matched && c.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+
+      if (winner) {
+        reasoning.push(`Matched "${winner.capabilityId}" with ${winner.score}% confidence`)
+      }
+      if (rejected.length) {
+        reasoning.push(`Rejected: ${rejected.map(r => `${r.capabilityId} (${r.score}%)`).join(', ')}`)
+      }
+      reasoning.push(`Resolved via: ${resolvedVia}`)
+      if (matchResult.extractedParams && Object.keys(matchResult.extractedParams).length) {
+        const params = Object.entries(matchResult.extractedParams)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(', ')
+        reasoning.push(`Extracted params: ${params}`)
+      }
+    } else {
+      reasoning.push(matchResult.reasoning)
+    }
+
+    // ── Step 7: Record learning ──────────────────────────────────────────────
     await this.recordLearning(query, matchResult, resolvedVia)
 
-    const totalMs = Date.now() - start
     const trace: ExecutionTrace = {
       query,
-      candidates:  matchResult.candidates ?? [],
-      reasoning:   [matchResult.reasoning],
-      steps: [
-        { type: 'cache_check',    status: 'miss', durationMs: 0 },
-        { type: resolvedVia === 'llm' ? 'llm_match' : 'keyword_match',
-          status: matchResult.capability ? 'pass' : 'fail',
-          durationMs: totalMs,
-          detail: matchResult.reasoning,
-        },
-        { type: 'resolve', status: resolution.success ? 'pass' : 'fail', durationMs: 0 },
-      ],
+      candidates: matchResult.candidates ?? [],
+      reasoning,
+      steps,
       resolvedVia,
-      totalMs,
+      totalMs: Date.now() - start,
     }
 
     return {
       match: matchResult,
       resolution,
       resolvedVia,
-      durationMs: totalMs,
+      durationMs: Date.now() - start,
       trace,
     }
   }
