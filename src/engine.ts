@@ -5,10 +5,10 @@ import type { CacheStore } from './cache'
 import type { LearningStore, LearningEntry } from './learning'
 import { match as _match, matchWithLLM as _matchWithLLM } from './matcher'
 import { resolve as _resolve } from './resolver'
-import { MemoryCache } from './cache'
 import { MemoryLearningStore } from './learning'
 import { logger } from './logger'
 import type { MatchMode } from './index'
+import { MemoryCache, buildCacheKey } from './cache'
 
 // ─── Engine Options ───────────────────────────────────────────────────────────
 
@@ -105,7 +105,8 @@ export class CapmanEngine {
     // ── Step 1: Check cache ──────────────────────────────────────────────────
     const cacheStart = Date.now()
     if (this.cache) {
-      const cached = await this.cache.get(query)
+      const cacheKey = buildCacheKey(query, null, {})
+      const cached = await this.cache.get(cacheKey)
       if (cached) {
         steps.push({ type: 'cache_check', status: 'hit', durationMs: Date.now() - cacheStart, detail: 'Served from cache' })
         logger.info(`Cache hit for: "${query}"`)
@@ -195,7 +196,8 @@ export class CapmanEngine {
 
     // ── Step 4: Cache the match result ───────────────────────────────────────
     if (this.cache && matchResult.capability) {
-      await this.cache.set(query, matchResult)
+      const key = buildCacheKey(query, matchResult.capability.id, matchResult.extractedParams)
+      await this.cache.set(key, matchResult)
     }
 
     // ── Step 5: Resolve ──────────────────────────────────────────────────────

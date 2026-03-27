@@ -15,8 +15,8 @@ export interface CacheEntry {
 // ─── Cache Interface ──────────────────────────────────────────────────────────
 
 export interface CacheStore {
-  get(query: string): Promise<CacheEntry | null>
-  set(query: string, result: MatchResult): Promise<void>
+  get(key: string): Promise<CacheEntry | null>
+  set(key: string, result: MatchResult): Promise<void>
   clear(): Promise<void>
   size(): Promise<number>
 }
@@ -27,6 +27,27 @@ function normalizeQuery(query: string): string {
   return query.toLowerCase().trim().replace(/\s+/g, ' ')
 }
 
+/**
+ * Build a smarter cache key based on matched capability + extracted params.
+ * Two different queries that resolve to the same capability with the same params
+ * will share a cache entry — dramatically improving hit rate.
+ * Falls back to normalized query if no capability matched.
+ */
+
+export function buildCacheKey(
+  query: string,
+  capabilityId: string | null,
+  extractedParams: Record<string, string | null>
+): string {
+  if (!capabilityId) return `query:${normalizeQuery(query)}`
+  const paramStr = Object.entries(extractedParams)
+    .filter(([, v]) => v !== null)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('&')
+  return `cap:${capabilityId}${paramStr ? `:${paramStr}` : ''}`
+}
+
 // ─── Memory Cache ─────────────────────────────────────────────────────────────
 
 const MEMORY_CACHE_MAX = 512
@@ -34,41 +55,33 @@ const MEMORY_CACHE_MAX = 512
 export class MemoryCache implements CacheStore {
   private store = new Map<string, CacheEntry>()
 
-  async get(query: string): Promise<CacheEntry | null> {
-    const key = normalizeQuery(query)
+  async get(key: string): Promise<CacheEntry | null> {
     const entry = this.store.get(key)
     if (entry) {
       entry.hits++
-      logger.debug(`Cache hit (memory): "${query}"`)
+      logger.debug(`Cache hit (memory): "${key}"`)
       return entry
     }
     return null
   }
 
-  async set(query: string, result: MatchResult): Promise<void> {
-    const key = normalizeQuery(query)
+  async set(key: string, result: MatchResult): Promise<void> {
     if (this.store.size >= MEMORY_CACHE_MAX) {
-      // Evict the oldest entry (Maps maintain insertion order)
       const oldest = this.store.keys().next().value
       if (oldest !== undefined) this.store.delete(oldest)
       logger.debug(`Cache evicted oldest entry (max size ${MEMORY_CACHE_MAX} reached)`)
     }
     this.store.set(key, {
-      query,
+      query: key,
       result,
       cachedAt: new Date().toISOString(),
       hits: 0,
     })
-    logger.debug(`Cache set (memory): "${query}"`)
+    logger.debug(`Cache set (memory): "${key}"`)
   }
 
-  async clear(): Promise<void> {
-    this.store.clear()
-  }
-
-  async size(): Promise<number> {
-    return this.store.size
-  }
+  async clear(): Promise<void> { this.store.clear() }
+  async size(): Promise<number> { return this.store.size }
 }
 
 // ─── File Cache ───────────────────────────────────────────────────────────────
@@ -108,29 +121,27 @@ export class FileCache implements CacheStore {
     }
   }
 
-  async get(query: string): Promise<CacheEntry | null> {
+  async get(key: string): Promise<CacheEntry | null> {
     await this.load()
-    const key = normalizeQuery(query)
     const entry = this.store.get(key)
     if (entry) {
       entry.hits++
-      logger.debug(`Cache hit (file): "${query}"`)
+      logger.debug(`Cache hit (file): "${key}"`)
       return entry
     }
     return null
   }
 
-  async set(query: string, result: MatchResult): Promise<void> {
+  async set(key: string, result: MatchResult): Promise<void> {
     await this.load()
-    const key = normalizeQuery(query)
     this.store.set(key, {
-      query,
+      query: key,
       result,
       cachedAt: new Date().toISOString(),
       hits: 0,
     })
     await this.save()
-    logger.debug(`Cache set (file): "${query}"`)
+    logger.debug(`Cache set (file): "${key}"`)
   }
 
   async clear(): Promise<void> {
@@ -155,27 +166,22 @@ export class ComboCache implements CacheStore {
     this.file   = new FileCache(filePath)
   }
 
-  async get(query: string): Promise<CacheEntry | null> {
-    // Memory first — fastest
-    const memHit = await this.memory.get(query)
+  async get(key: string): Promise<CacheEntry | null> {
+    const memHit = await this.memory.get(key)
     if (memHit) return memHit
-
-    // File fallback — persists across restarts
-    const fileHit = await this.file.get(query)
+    const fileHit = await this.file.get(key)
     if (fileHit) {
-      // Promote to memory for next time
-      await this.memory.set(query, fileHit.result)
-      logger.debug(`Cache promoted to memory: "${query}"`)
+      await this.memory.set(key, fileHit.result)
+      logger.debug(`Cache promoted to memory: "${key}"`)
       return fileHit
     }
-
     return null
   }
 
-  async set(query: string, result: MatchResult): Promise<void> {
+  async set(key: string, result: MatchResult): Promise<void> {
     await Promise.all([
-      this.memory.set(query, result),
-      this.file.set(query, result),
+      this.memory.set(key, result),
+      this.file.set(key, result),
     ])
   }
 

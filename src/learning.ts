@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { MatchResult } from './types'
 import { logger } from './logger'
+const MAX_LEARNING_ENTRIES = 10_000
 
 // ─── Learning Entry ───────────────────────────────────────────────────────────
 
@@ -130,6 +131,14 @@ export class FileLearningStore implements LearningStore {
   async record(entry: LearningEntry): Promise<void> {
     await this.load()
     this.entries.push(entry)
+
+    // Prune oldest entries if over cap
+    if (this.entries.length > MAX_LEARNING_ENTRIES) {
+      const excess = this.entries.length - MAX_LEARNING_ENTRIES
+      this.entries.splice(0, excess)
+      logger.debug(`Learning store pruned ${excess} oldest entries (cap: ${MAX_LEARNING_ENTRIES})`)
+    }
+
     await this.save()
     logger.debug(`Learning recorded: "${entry.query}" → ${entry.capabilityId ?? 'OUT_OF_SCOPE'} via ${entry.resolvedVia}`)
   }
@@ -157,8 +166,11 @@ export class MemoryLearningStore implements LearningStore {
 
   async record(entry: LearningEntry): Promise<void> {
     this.entries.push(entry)
+    if (this.entries.length > MAX_LEARNING_ENTRIES) {
+      this.entries.splice(0, this.entries.length - MAX_LEARNING_ENTRIES)
+    }
   }
-
+  
   async getStats(): Promise<KeywordStats> {
     return computeStats(this.entries)
   }
@@ -171,3 +183,7 @@ export class MemoryLearningStore implements LearningStore {
     this.entries = []
   }
 }
+
+
+
+

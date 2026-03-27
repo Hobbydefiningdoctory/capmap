@@ -1,6 +1,11 @@
 export { setLogLevel } from './logger'
 export type { LogLevel } from './logger'
-import { logger } from './logger'
+import { CapmanEngine } from './engine'
+import { match as _match, matchWithLLM as _matchWithLLM } from './matcher'
+import { resolve as _resolve } from './resolver'
+import type { Manifest, MatchResult, ResolveResult } from './types'
+import type { LLMMatcherOptions } from './matcher'
+import type { ResolveOptions } from './resolver'
 
 export type {
   Capability,
@@ -43,11 +48,6 @@ export type { ResolveOptions, AuthContext } from './resolver'
 
 // ─── Convenience: ask() — match + resolve in one call ────────────────────────
 
-import { match as _match, matchWithLLM as _matchWithLLM } from './matcher'
-import { resolve as _resolve } from './resolver'
-import type { Manifest, MatchResult, ResolveResult } from './types'
-import type { LLMMatcherOptions } from './matcher'
-import type { ResolveOptions } from './resolver'
 
 export type MatchMode = 'cheap' | 'balanced' | 'accurate'
 
@@ -77,6 +77,11 @@ export interface AskOptions extends ResolveOptions {
   mode?: MatchMode
 }
 
+export interface AskOptions extends ResolveOptions {
+  llm?: LLMMatcherOptions['llm']
+  mode?: MatchMode
+}
+
 export interface AskResult {
   match: MatchResult
   resolution: ResolveResult
@@ -84,11 +89,14 @@ export interface AskResult {
 
 /**
  * One-shot convenience: match + resolve in a single call.
+ * Delegates to CapmanEngine internally.
  *
  * @example
  * const result = await ask("show me the dashboard", manifest, {
  *   baseUrl: 'https://api.your-app.com',
  * })
+ *
+ * @deprecated For full features including trace and caching, use CapmanEngine directly.
  */
 
 export async function ask(
@@ -96,45 +104,19 @@ export async function ask(
   manifest: Manifest,
   options: AskOptions = {}
 ): Promise<AskResult> {
-  const { llm, mode = 'balanced', ...resolveOptions } = options
+  const { llm, mode, ...resolveOptions } = options
 
-  let matchResult: MatchResult
+  const engine = new CapmanEngine({
+    manifest,
+    llm,
+    mode,
+    cache: false,
+    learning: false,
+    baseUrl: resolveOptions.baseUrl,
+    auth: resolveOptions.auth,
+    headers: resolveOptions.headers,
+  })
 
-  switch (mode) {
-    case 'cheap': {
-      // Keyword only — never calls LLM
-      matchResult = _match(query, manifest)
-      break
-    }
-
-    case 'accurate': {
-      // LLM first — falls back to keyword if LLM fails or no llm provided
-      if (llm) {
-        matchResult = await _matchWithLLM(query, manifest, { llm })
-      } else {
-        logger.warn('ask() mode is "accurate" but no llm function was provided — falling back to keyword matching')
-        matchResult = _match(query, manifest)
-      }
-      break
-    }
-
-    case 'balanced':
-    default: {
-      // Keyword first — LLM fallback if confidence below threshold
-      const keywordResult = _match(query, manifest)
-      const THRESHOLD = 50
-      matchResult = (keywordResult.confidence >= THRESHOLD || !llm)
-        ? keywordResult
-        : await _matchWithLLM(query, manifest, { llm })
-      break
-    }
-  }
-
-  const resolution = await _resolve(
-    matchResult,
-    matchResult.extractedParams as Record<string, unknown>,
-    resolveOptions
-  )
-
-  return { match: matchResult, resolution }
+  const result = await engine.ask(query, resolveOptions)
+  return { match: result.match, resolution: result.resolution }
 }

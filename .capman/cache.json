@@ -33,7 +33,44 @@
       "extractedParams": {},
       "reasoning": "test"
     },
-    "cachedAt": "2026-03-26T11:26:23.977Z",
+    "cachedAt": "2026-03-27T12:37:48.300Z",
+    "hits": 0
+  },
+  "Show me articles": {
+    "query": "Show me articles",
+    "result": {
+      "capability": {
+        "id": "get_articles",
+        "name": "Get articles",
+        "description": "Fetch a list of articles from the platform.",
+        "examples": [
+          "Show me articles",
+          "List all posts",
+          "Get latest articles"
+        ],
+        "params": [],
+        "returns": [
+          "articles"
+        ],
+        "resolver": {
+          "type": "api",
+          "endpoints": [
+            {
+              "method": "GET",
+              "path": "/articles"
+            }
+          ]
+        },
+        "privacy": {
+          "level": "public"
+        }
+      },
+      "confidence": 100,
+      "intent": "retrieval",
+      "extractedParams": {},
+      "reasoning": "test"
+    },
+    "cachedAt": "2026-03-27T13:02:09.774Z",
     "hits": 0
   }
 }
