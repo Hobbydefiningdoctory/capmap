@@ -60,36 +60,87 @@ const config: CapmanConfig = {
 
 const manifest = generate(config)
 
-// ── Replit AI LLM function (OpenAI-compatible proxy) ─────────────────────────
+// ── OpenRouter LLM function ───────────────────────────────────────────────────
 
-async function replitAI(prompt: string): Promise<string> {
-  const baseUrl  = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
-  const apiKey   = process.env.AI_INTEGRATIONS_OPENAI_API_KEY
+const OPENROUTER_MODEL = 'meta-llama/llama-3.3-70b-instruct:free'
 
-  if (!baseUrl || !apiKey) {
-    throw new Error('Replit AI env vars not set (AI_INTEGRATIONS_OPENAI_BASE_URL / AI_INTEGRATIONS_OPENAI_API_KEY)')
-  }
+async function openrouter(prompt: string): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY not set in .env')
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type':  'application/json',
       'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer':  'https://github.com/capman-ai/capman',
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model:      OPENROUTER_MODEL,
       max_tokens: 500,
-      messages: [{ role: 'user', content: prompt }],
+      messages:   [{ role: 'user', content: prompt }],
     }),
   })
 
   const data = await res.json() as any
-
-  if (!res.ok) {
-    throw new Error(`Replit AI error: ${res.status} ${JSON.stringify(data)}`)
-  }
-
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${data.error?.message ?? JSON.stringify(data)}`)
   return data.choices[0].message.content
+}
+
+// ── Replit AI fallback (OpenAI-compatible proxy) ──────────────────────────────
+
+async function replitAI(prompt: string): Promise<string> {
+  const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+  const apiKey  = process.env.AI_INTEGRATIONS_OPENAI_API_KEY
+  if (!baseUrl || !apiKey) throw new Error('Replit AI env vars not set')
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model:      'gpt-4o-mini',
+      max_tokens: 500,
+      messages:   [{ role: 'user', content: prompt }],
+    }),
+  })
+
+  const data = await res.json() as any
+  if (!res.ok) throw new Error(`Replit AI ${res.status}: ${JSON.stringify(data)}`)
+  return data.choices[0].message.content
+}
+
+// ── Auto-detect which LLM is available ───────────────────────────────────────
+
+async function detectLLM(): Promise<{ fn: (p: string) => Promise<string>; name: string }> {
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      // Probe with a minimal request — if the account/key works, use OpenRouter
+      const probe = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'HTTP-Referer':  'https://github.com/capman-ai/capman',
+        },
+        body: JSON.stringify({
+          model:      OPENROUTER_MODEL,
+          max_tokens: 5,
+          messages:   [{ role: 'user', content: 'hi' }],
+        }),
+      })
+      const pd = await probe.json() as any
+      if (probe.ok) {
+        return { fn: openrouter, name: `OpenRouter — ${OPENROUTER_MODEL}` }
+      }
+      console.warn(`  ⚠  OpenRouter unavailable (${pd.error?.message ?? probe.status}) — falling back to Replit AI`)
+    } catch {
+      console.warn('  ⚠  OpenRouter probe failed — falling back to Replit AI')
+    }
+  }
+  return { fn: replitAI, name: 'Replit AI — gpt-4o-mini' }
 }
 
 // ── Test queries ──────────────────────────────────────────────────────────────
@@ -109,14 +160,16 @@ const queries = [
 ]
 
 async function run() {
+  const llm = await detectLLM()
+
   console.log('\n✓ Manifest ready —', manifest.capabilities.length, 'capabilities')
-  console.log('  Model: gpt-4o-mini (Replit AI)\n')
+  console.log('  Model:', llm.name, '\n')
   console.log('─'.repeat(60))
 
   // Test 1: matchWithLLM directly
   console.log('\n── Direct LLM matching:\n')
   for (const query of queries) {
-    const result = await matchWithLLM(query, manifest, { llm: replitAI })
+    const result = await matchWithLLM(query, manifest, { llm: llm.fn })
     const status = result.capability ? '✓' : '○'
     const name   = result.capability?.id ?? 'OUT_OF_SCOPE'
     console.log(`  ${status}  "${query}"`)
@@ -135,7 +188,7 @@ async function run() {
   const engine = new CapmanEngine({
     manifest,
     mode: 'accurate',
-    llm: replitAI,
+    llm: llm.fn,
     cache: false,
     learning: false,
   })
