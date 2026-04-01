@@ -52,6 +52,9 @@ export type { CacheStore, CacheEntry } from './cache'
 export { FileLearningStore, MemoryLearningStore } from './learning'
 export type { LearningStore, LearningEntry, KeywordStats } from './learning'
 
+export { parseOpenAPI } from './parser'
+export type { ParseResult } from './parser'
+
 // ─── Convenience: ask() ───────────────────────────────────────────────────────
 
 import { CapmanEngine } from './engine'
