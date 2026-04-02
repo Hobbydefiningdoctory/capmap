@@ -36,6 +36,32 @@ export interface EngineOptions {
   headers?: Record<string, string>
   /** Confidence threshold for keyword matcher (default: 50) */
   threshold?: number
+  /**
+   * Maximum LLM calls per minute in balanced/accurate mode.
+   * After limit is hit, falls back to keyword result.
+   * @default 60
+   */
+  maxLLMCallsPerMinute?: number
+
+  /**
+   * Minimum milliseconds between consecutive LLM calls.
+   * Useful for free-tier models with burst limits.
+   * @default 0
+   */
+  llmCooldownMs?: number
+
+  /**
+   * Maximum consecutive LLM failures before circuit breaker opens.
+   * When open, LLM calls are skipped for llmCircuitBreakerResetMs.
+   * @default 3
+   */
+  llmCircuitBreakerThreshold?: number
+
+  /**
+   * Milliseconds to wait before retrying LLM after circuit breaker opens.
+   * @default 60000
+   */
+  llmCircuitBreakerResetMs?: number
 }
 
 // ─── Engine Result ────────────────────────────────────────────────────────────
@@ -62,6 +88,19 @@ export class CapmanEngine {
   private headers?:  Record<string, string>
   private threshold: number
 
+  // ── LLM rate limiting ──────────────────────────────────────────────────────
+  private maxLLMCallsPerMinute:        number
+  private llmCooldownMs:               number
+  private llmCircuitBreakerThreshold:  number
+  private llmCircuitBreakerResetMs:    number
+
+  // ── LLM rate limiting state ────────────────────────────────────────────────
+  private llmCallsThisMinute:    number   = 0
+  private llmWindowStart:        number   = Date.now()
+  private llmLastCallAt:         number   = 0
+  private llmConsecutiveFails:   number   = 0
+  private llmCircuitOpenAt:      number   = 0
+
   constructor(options: EngineOptions) {
     this.manifest  = options.manifest
     this.mode      = options.mode ?? 'balanced'
@@ -70,6 +109,10 @@ export class CapmanEngine {
     this.auth      = options.auth
     this.headers   = options.headers
     this.threshold = options.threshold ?? 50
+    this.maxLLMCallsPerMinute       = options.maxLLMCallsPerMinute       ?? 60
+    this.llmCooldownMs              = options.llmCooldownMs              ?? 0
+    this.llmCircuitBreakerThreshold = options.llmCircuitBreakerThreshold ?? 3
+    this.llmCircuitBreakerResetMs   = options.llmCircuitBreakerResetMs   ?? 60_000
 
     // Cache — default MemoryCache (no filesystem writes), or disabled with false
     // Use FileCache or ComboCache explicitly for persistence across restarts
@@ -102,13 +145,13 @@ export class CapmanEngine {
     const steps: TraceStep[] = []
     let resolvedVia: EngineResult['resolvedVia'] = 'keyword'
 
-        // ── Step 1: Check cache ──────────────────────────────────────────────────
-        const cacheStart = Date.now()
-        if (this.cache) {
-          const queryKey = normalizeQuery(query)
-          const cached = await this.cache.get(queryKey)
-          if (cached) {
-            steps.push({ type: 'cache_check', status: 'hit', durationMs: Date.now() -        cacheStart, detail: 'Served from cache' })
+    // ── Step 1: Check cache ──────────────────────────────────────────────────
+    const cacheStart = Date.now()
+    if (this.cache) {
+      const queryKey = normalizeQuery(query)
+      const cached = await this.cache.get(queryKey)
+      if (cached) {
+        steps.push({ type: 'cache_check', status: 'hit', durationMs: Date.now() - cacheStart, detail: 'Served from cache' })
         logger.info(`Cache hit for: "${query}"`)
         const resolution = await _resolve(
           cached.result,
@@ -117,7 +160,7 @@ export class CapmanEngine {
         )
         const trace: ExecutionTrace = {
           query,
-          candidates: cached.result.candidates ?? [],
+          candidates: cached.result.candidates,
           reasoning: [`Served from cache (original: ${cached.result.reasoning})`],
           steps,
           resolvedVia: 'cache',
@@ -133,10 +176,10 @@ export class CapmanEngine {
         await this.recordLearning(query, cached.result, 'cache')
         return result
       }
-          steps.push({ type: 'cache_check', status: 'miss', durationMs: Date.now() - cacheStart })
-          } else {
-            steps.push({ type: 'cache_check', status: 'skip', durationMs: 0, detail: 'Cache disabled' })
-          }
+      steps.push({ type: 'cache_check', status: 'miss', durationMs: Date.now() - cacheStart })
+    } else {
+      steps.push({ type: 'cache_check', status: 'skip', durationMs: 0, detail: 'Cache disabled' })
+    }
 
     // ── Step 2: Match ────────────────────────────────────────────────────────
     let matchResult: MatchResult
@@ -151,10 +194,28 @@ export class CapmanEngine {
 
       case 'accurate': {
         if (this.llm) {
-          const t = Date.now()
-          matchResult = await _matchWithLLM(query, this.manifest, { llm: this.llm })
-          resolvedVia = 'llm'
-          steps.push({ type: 'llm_match', status: 'pass', durationMs: Date.now() - t, detail: `confidence: ${matchResult.confidence}%` })
+          const skipReason = this.checkLLMAllowed()
+          if (skipReason) {
+            logger.warn(`LLM skipped — ${skipReason} — falling back to keyword`)
+            const t = Date.now()
+            matchResult = _match(query, this.manifest)
+            steps.push({ type: 'keyword_match', status: 'pass', durationMs: Date.now() - t, detail: `llm skipped: ${skipReason}` })
+          } else {
+            const t = Date.now()
+            try {
+              matchResult = await _matchWithLLM(query, this.manifest, { llm: this.llm })
+              this.recordLLMSuccess()
+              resolvedVia = 'llm'
+              steps.push({ type: 'llm_match', status: 'pass', durationMs: Date.now() - t, detail: `confidence: ${matchResult.confidence}%` })
+            } catch (err) {
+              this.recordLLMFailure()
+              logger.warn(`LLM call failed — falling back to keyword: ${err}`)
+              const t2 = Date.now()
+              matchResult = _match(query, this.manifest)
+              steps.push({ type: 'llm_match', status: 'fail', durationMs: Date.now() - t, detail: String(err) })
+              steps.push({ type: 'keyword_match', status: 'pass', durationMs: Date.now() - t2, detail: 'fallback after llm failure' })
+            }
+          }
         } else {
           logger.warn('accurate mode requires llm — falling back to keyword')
           const t = Date.now()
@@ -163,24 +224,40 @@ export class CapmanEngine {
         }
         break
       }
+        
 
-      case 'balanced':
-      default: {
-        const t1 = Date.now()
-        const keywordResult = _match(query, this.manifest)
-        steps.push({ type: 'keyword_match', status: 'pass', durationMs: Date.now() - t1, detail: `confidence: ${keywordResult.confidence}%` })
+    case 'balanced':
+    default: {
+      const t1 = Date.now()
+      const keywordResult = _match(query, this.manifest)
+      steps.push({ type: 'keyword_match', status: 'pass', durationMs: Date.now() - t1, detail: `confidence: ${keywordResult.confidence}%` })
 
-        if (keywordResult.confidence >= this.threshold || !this.llm) {
+      if (keywordResult.confidence >= this.threshold || !this.llm) {
+        matchResult = keywordResult
+      } else {
+        const skipReason = this.checkLLMAllowed()
+        if (skipReason) {
+          logger.warn(`LLM skipped — ${skipReason}`)
+          steps.push({ type: 'llm_match', status: 'skip', durationMs: 0, detail: skipReason })
           matchResult = keywordResult
         } else {
           logger.info(`Low confidence (${keywordResult.confidence}%) — escalating to LLM`)
           const t2 = Date.now()
-          matchResult = await _matchWithLLM(query, this.manifest, { llm: this.llm })
-          resolvedVia = 'llm'
-          steps.push({ type: 'llm_match', status: 'pass', durationMs: Date.now() - t2, detail: `confidence: ${matchResult.confidence}%` })
+          try {
+            matchResult = await _matchWithLLM(query, this.manifest, { llm: this.llm })
+            this.recordLLMSuccess()
+            resolvedVia = 'llm'
+            steps.push({ type: 'llm_match', status: 'pass', durationMs: Date.now() - t2, detail: `confidence: ${matchResult.confidence}%` })
+          } catch (err) {
+            this.recordLLMFailure()
+            logger.warn(`LLM call failed — falling back to keyword: ${err}`)
+            steps.push({ type: 'llm_match', status: 'fail', durationMs: Date.now() - t2, detail: String(err) })
+            matchResult = keywordResult
+          }
         }
-        break
       }
+      break
+    }
     }
 
     // ── Step 3: Privacy check ────────────────────────────────────────────────
@@ -216,7 +293,7 @@ export class CapmanEngine {
 
     // ── Step 6: Build reasoning array ────────────────────────────────────────
     const reasoning: string[] = []
-    if (matchResult.candidates?.length) {
+    if (matchResult.candidates.length) {
       const winner = matchResult.candidates.find(c => c.matched)
       const rejected = matchResult.candidates
         .filter(c => !c.matched && c.score > 0)
@@ -299,19 +376,59 @@ export class CapmanEngine {
   async explain(query: string): Promise<ExplainResult> {
     const start = Date.now()
 
-    // ── Match ────────────────────────────────────────────────────────────────
+    // ── Match — mirrors ask() logic including rate limiting ───────────────────
     let matchResult: MatchResult
     let resolvedVia: ExplainResult['resolvedVia'] = 'keyword'
 
-    if (this.mode === 'accurate' && this.llm) {
-      matchResult = await _matchWithLLM(query, this.manifest, { llm: this.llm })
-      resolvedVia = 'llm'
+    if (this.mode === 'accurate') {
+      if (this.llm) {
+        const skipReason = this.checkLLMAllowed()
+        if (skipReason) {
+          logger.warn(`explain(): LLM skipped — ${skipReason} — falling back to keyword`)
+          matchResult = _match(query, this.manifest)
+        } else {
+          try {
+            matchResult = await _matchWithLLM(query, this.manifest, { llm: this.llm })
+            this.recordLLMSuccess()
+            resolvedVia = 'llm'
+          } catch (err) {
+            this.recordLLMFailure()
+            logger.warn(`explain(): LLM call failed — falling back to keyword: ${err}`)
+            matchResult = _match(query, this.manifest)
+          }
+        }
+      } else {
+        matchResult = _match(query, this.manifest)
+      }
+    } else if (this.mode === 'balanced' && this.llm) {
+      // Keyword first — escalate to LLM if low confidence (same as ask())
+      const keywordResult = _match(query, this.manifest)
+      if (keywordResult.confidence >= this.threshold) {
+        matchResult = keywordResult
+      } else {
+        const skipReason = this.checkLLMAllowed()
+        if (skipReason) {
+          logger.warn(`explain(): LLM skipped — ${skipReason}`)
+          matchResult = keywordResult
+        } else {
+          try {
+            matchResult = await _matchWithLLM(query, this.manifest, { llm: this.llm })
+            this.recordLLMSuccess()
+            resolvedVia = 'llm'
+          } catch (err) {
+            this.recordLLMFailure()
+            logger.warn(`explain(): LLM call failed — falling back to keyword: ${err}`)
+            matchResult = keywordResult
+          }
+        }
+      }
     } else {
+      // cheap mode or no llm — keyword only
       matchResult = _match(query, this.manifest)
     }
 
     // ── Build candidate explanations ─────────────────────────────────────────
-    const candidates: ExplainCandidate[] = (matchResult.candidates ?? [])
+    const candidates: ExplainCandidate[] = matchResult.candidates
       .sort((a, b) => b.score - a.score)
       .map(c => {
         const cap = this.manifest.capabilities.find(mc => mc.id === c.capabilityId)
@@ -424,6 +541,72 @@ export class CapmanEngine {
       wouldExecute: { resolverType, action, privacy, blocked },
       resolvedVia,
       durationMs: Date.now() - start,
+    }
+  }
+
+  /**
+   * Checks all rate limiting and circuit breaker conditions.
+   * Returns null if LLM call is allowed, or a skip reason string if it should be skipped.
+   */
+  private checkLLMAllowed(): string | null {
+    const now = Date.now()
+
+    // ── Circuit breaker ──────────────────────────────────────────────────────
+    if (this.llmCircuitOpenAt > 0) {
+      const elapsed = now - this.llmCircuitOpenAt
+      if (elapsed < this.llmCircuitBreakerResetMs) {
+        const remainingSec = Math.ceil((this.llmCircuitBreakerResetMs - elapsed) / 1000)
+        return `circuit breaker open — ${remainingSec}s remaining`
+      }
+      // Reset circuit breaker — try again
+      logger.info('LLM circuit breaker reset — trying again')
+      this.llmCircuitOpenAt    = 0
+      this.llmConsecutiveFails = 0
+    }
+
+    // ── Cooldown between calls ───────────────────────────────────────────────
+    if (this.llmCooldownMs > 0 && this.llmLastCallAt > 0) {
+      const elapsed = now - this.llmLastCallAt
+      if (elapsed < this.llmCooldownMs) {
+        const remainingMs = this.llmCooldownMs - elapsed
+        return `cooldown active — ${remainingMs}ms remaining`
+      }
+    }
+
+    // ── Per-minute rate limit ────────────────────────────────────────────────
+    const windowElapsed = now - this.llmWindowStart
+    if (windowElapsed >= 60_000) {
+      // Reset window
+      this.llmCallsThisMinute = 0
+      this.llmWindowStart     = now
+    }
+
+    if (this.llmCallsThisMinute >= this.maxLLMCallsPerMinute) {
+      const windowResetIn = Math.ceil((60_000 - windowElapsed) / 1000)
+      return `rate limit reached (${this.maxLLMCallsPerMinute}/min) — resets in ${windowResetIn}s`
+    }
+
+    return null
+  }
+
+  /**
+   * Records a successful LLM call — updates rate limit counters.
+   */
+  private recordLLMSuccess(): void {
+    this.llmCallsThisMinute++
+    this.llmLastCallAt       = Date.now()
+    this.llmConsecutiveFails = 0
+  }
+
+  /**
+   * Records a failed LLM call — may open the circuit breaker.
+   */
+  private recordLLMFailure(): void {
+    this.llmConsecutiveFails++
+    this.llmLastCallAt = Date.now()
+    if (this.llmConsecutiveFails >= this.llmCircuitBreakerThreshold) {
+      this.llmCircuitOpenAt = Date.now()
+      logger.warn(`LLM circuit breaker opened after ${this.llmConsecutiveFails} consecutive failures — pausing for ${this.llmCircuitBreakerResetMs / 1000}s`)
     }
   }
   
