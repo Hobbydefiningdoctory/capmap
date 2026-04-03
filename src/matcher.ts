@@ -253,31 +253,25 @@ export async function matchWithLLM(
   "extracted_params": { "<param_name>": "<value or null>" }
   }`
 
-  try {
-    const raw   = await options.llm(prompt)
-    const clean = raw.replace(/```json|```/g, '').trim()
-    const parsed = JSON.parse(clean)
+  const raw   = await options.llm(prompt)
+  const clean = raw.replace(/```json|```/g, '').trim()
+  const parsed = JSON.parse(clean)
 
-    const isOOS    = parsed.matched_capability === 'OUT_OF_SCOPE'
-    const capability = isOOS
-      ? null
-      : manifest.capabilities.find(c => c.id === parsed.matched_capability) ?? null
+  const isOOS    = parsed.matched_capability === 'OUT_OF_SCOPE'
+  const capability = isOOS
+    ? null
+    : manifest.capabilities.find(c => c.id === parsed.matched_capability) ?? null
 
-    return {
-      capability,
-      confidence: parsed.confidence,
-      intent: isOOS ? 'out_of_scope' : parsed.intent,
-      extractedParams: parsed.extracted_params ?? {},
-      reasoning: parsed.reasoning,
-      candidates: capability ? [{
-        capabilityId: capability.id,
-        score: parsed.confidence,
-        matched: true,
-      }] : [],
-    }
-    
-  } catch (err) {
-    logger.warn(`LLM match failed, falling back to keyword matcher: ${err}`)
-    return match(query, manifest)
+  return {
+    capability,
+    confidence: parsed.confidence,
+    intent: isOOS ? 'out_of_scope' : parsed.intent,
+    extractedParams: parsed.extracted_params ?? {},
+    reasoning: parsed.reasoning,
+    candidates: capability ? [{
+      capabilityId: capability.id,
+      score: parsed.confidence,
+      matched: true,
+    }] : [],
   }
 }

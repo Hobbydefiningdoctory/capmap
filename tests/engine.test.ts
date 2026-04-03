@@ -404,4 +404,101 @@ describe('CapmanEngine', () => {
     })
   })
 
+  describe('LLM rate limiting', () => {
+    it('skips LLM when rate limit is exceeded', async () => {
+      let llmCalled = false
+      const engine = new CapmanEngine({
+        manifest,
+        cache: false,
+        learning: false,
+        mode: 'balanced',
+        maxLLMCallsPerMinute: 0, // immediately exhausted
+        llm: async () => {
+          llmCalled = true
+          return JSON.stringify({
+            matched_capability: 'get_articles',
+            confidence: 90,
+            intent: 'retrieval',
+            reasoning: 'test',
+            extracted_params: {},
+          })
+        },
+      })
+
+      const result = await engine.ask('something vague', { dryRun: true })
+      expect(llmCalled).toBe(false)
+      expect(result.trace.steps.some(s => s.type === 'llm_match' && s.status === 'skip')).toBe(true)
+    })
+
+    it('skips LLM when cooldown is active', async () => {
+      let llmCallCount = 0
+      const engine = new CapmanEngine({
+        manifest,
+        cache: false,
+        learning: false,
+        mode: 'accurate',
+        llmCooldownMs: 60_000, // 60 second cooldown
+        llm: async () => {
+          llmCallCount++
+          return JSON.stringify({
+            matched_capability: 'get_articles',
+            confidence: 90,
+            intent: 'retrieval',
+            reasoning: 'test',
+            extracted_params: {},
+          })
+        },
+      })
+
+      // First call — LLM should be called
+      await engine.ask('Show me articles', { dryRun: true })
+      expect(llmCallCount).toBe(1)
+
+      // Second call — cooldown active, LLM should be skipped
+      await engine.ask('Show me articles', { dryRun: true })
+      expect(llmCallCount).toBe(1)
+    })
+
+    it('opens circuit breaker after consecutive failures', async () => {
+      let llmCallCount = 0
+      const engine = new CapmanEngine({
+        manifest,
+        cache: false,
+        learning: false,
+        mode: 'accurate',
+        llmCircuitBreakerThreshold: 2,
+        llmCircuitBreakerResetMs: 60_000,
+        llm: async () => {
+          llmCallCount++
+          throw new Error('LLM provider unavailable')
+        },
+      })
+
+      // First two calls — LLM fails, circuit opens
+      await engine.ask('Show me articles', { dryRun: true })
+      await engine.ask('Show me articles', { dryRun: true })
+      expect(llmCallCount).toBe(2)
+
+      // Third call — circuit open, LLM not called
+      await engine.ask('Show me articles', { dryRun: true })
+      expect(llmCallCount).toBe(2)
+    })
+
+    it('falls back to keyword when LLM fails', async () => {
+      const engine = new CapmanEngine({
+        manifest,
+        cache: false,
+        learning: false,
+        mode: 'accurate',
+        llmCircuitBreakerThreshold: 99,
+        llm: async () => { throw new Error('LLM unavailable') },
+      })
+
+      const result = await engine.ask('Show me articles', { dryRun: true })
+      // Should still return a result via keyword fallback
+      expect(result.resolution).toBeDefined()
+      expect(result.trace.steps.some(s => s.type === 'llm_match' && s.status === 'fail')).toBe(true)
+    })
+  })
+
 })
