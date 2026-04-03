@@ -586,6 +586,9 @@ export class CapmanEngine {
       return `rate limit reached (${this.maxLLMCallsPerMinute}/min) — resets in ${windowResetIn}s`
     }
 
+    // Reserve the slot atomically before the call happens
+    this.llmCallsThisMinute++
+    this.llmLastCallAt = Date.now()
     return null
   }
 
@@ -593,8 +596,6 @@ export class CapmanEngine {
    * Records a successful LLM call — updates rate limit counters.
    */
   private recordLLMSuccess(): void {
-    this.llmCallsThisMinute++
-    this.llmLastCallAt       = Date.now()
     this.llmConsecutiveFails = 0
   }
 
@@ -602,6 +603,7 @@ export class CapmanEngine {
    * Records a failed LLM call — may open the circuit breaker.
    */
   private recordLLMFailure(): void {
+    this.llmCallsThisMinute++
     this.llmConsecutiveFails++
     this.llmLastCallAt = Date.now()
     if (this.llmConsecutiveFails >= this.llmCircuitBreakerThreshold) {

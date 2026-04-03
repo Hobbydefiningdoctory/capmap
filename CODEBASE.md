@@ -130,7 +130,7 @@ Key exports:
 - `FileCache` — async `fs.promises` read/write, lazy-loaded on first access
 - `ComboCache` — memory-first with file fallback, promotes file hits to memory
 - `normalizeQuery(query)` — lowercase + trim + collapse whitespace → cache key
-- `buildCacheKey(query, capabilityId, params)` — smarter key using capability + params
+- `buildCacheKey(query, capabilityId, params)` — smarter key using capability + params (exported for future post-match cache layer — not currently used by engine)
 
 Notes:
 - `FileCache` and `ComboCache` are single-instance only — concurrent writers will corrupt
@@ -176,7 +176,7 @@ Matching pipeline in `ask()`:
 1. Cache check — return immediately on hit
 2. Match — `cheap` / `balanced` / `accurate` mode
 3. Privacy check — recorded in trace
-4. Cache set — stores under query key + capability key
+4. Cache set — stores under normalized query key
 5. Resolve — actual API call or nav
 6. Reasoning build — human-readable array
 7. Learning record

@@ -21,7 +21,7 @@
     console.log()
 
     for (const cap of manifest.capabilities) {
-      const col = cap.resolver.type === 'nav' ? c.teal : c.teal
+      const col = cap.resolver.type === 'hybrid' ? c.yellow : c.teal
       console.log(`  ${c.bold}${cap.name}${c.reset}  ${col}[${cap.resolver.type}]${c.reset}  ${c.gray}${cap.privacy.level}${c.reset}`)
       console.log(`  ${c.gray}id: ${cap.id}${c.reset}`)
       console.log(`  ${cap.description}`)

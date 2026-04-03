@@ -36,6 +36,12 @@ export function loadConfig(configPath?: string): CapmanConfig {
       let raw: unknown
 
       // Catch syntax errors in config file
+
+      // Note: require() only works with CJS config files (.js, .json)
+      // ESM config files (.mjs or "type": "module") are not supported.
+      // Use a CJS config file or convert with: module.exports = { ... }
+      // Full ESM config support is planned for v0.5.
+    
       try {
         const mod = require(resolved)
         raw = mod.default ?? mod
