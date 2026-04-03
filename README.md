@@ -321,4 +321,4 @@ const result = await engine.ask('show my orders', {
 
 ## License
 
-MIT — [github.com/Hobbydefiningdoctory/capman]
+MIT — (github.com/Hobbydefiningdoctory/capman)
