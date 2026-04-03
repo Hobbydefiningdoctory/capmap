@@ -4,6 +4,53 @@ All notable changes to capman are documented here.
 
 ---
 
+## [Unreleased] — v0.4.3
+### Added
+- `CapmanEngine.explain(query)` — explains what would match without executing
+  - Returns all candidates with per-candidate human-readable explanations
+  - Shows `wouldExecute.action` — what API call or nav would happen
+  - Shows `wouldExecute.blocked` — if privacy would prevent execution
+  - Fully respects rate limiting and circuit breaker (mirrors `ask()` logic)
+- `ExplainResult` and `ExplainCandidate` types exported from public API
+- `capman explain "query"` CLI command — shows full explanation in terminal
+- LLM rate limiting and circuit breaker in `CapmanEngine`
+  - `maxLLMCallsPerMinute` — hard rate limit (default: 60)
+  - `llmCooldownMs` — minimum ms between consecutive LLM calls (default: 0)
+  - `llmCircuitBreakerThreshold` — failures before circuit opens (default: 3)
+  - `llmCircuitBreakerResetMs` — ms before circuit resets (default: 60000)
+  - `balanced` and `accurate` modes both respect all limits
+  - `explain()` shares the same rate limit state as `ask()`
+
+### Fixed
+- `explain()` now mirrors `ask()` matching logic exactly — balanced mode escalates to LLM when confidence < threshold
+- `matchWithLLM` internal try-catch removed — errors propagate to engine for proper circuit breaker tracking
+- Removed `?? []` on required `candidates` field in trace building
+- Removed `?.` on `candidates` in CLI `--debug` block
+- Fixed mixed indentation in `ask()` switch statement
+
+---
+
+## [0.4.2] — 2026-02-01
+### Added
+- `parseOpenAPI(specPathOrUrl)` — parses OpenAPI 3.x and Swagger 2.x specs into capman configs
+  - Reads local files or fetches from URL
+  - Extracts path params, query params, and request body fields
+  - Infers privacy scope from security schemes — bearer → `user_owned`, admin tags → `admin`
+  - Generates natural language examples from operation summaries
+  - Supports JSON specs; YAML requires `js-yaml` installed
+- `capman generate --from <path|url>` — generate manifest from OpenAPI/Swagger spec
+- `capman generate --ai` — AI-assisted manifest generation from plain English description
+  - Detects `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY` automatically
+  - Validates generated config with Zod before writing
+- `ParseResult` type exported from public API
+- 9 new parser tests covering all extraction and inference paths
+
+### Fixed
+- `bin/capman.js` `generate` command wrapped in async IIFE for proper async support
+- OpenAPI duplicate capability IDs resolved automatically with method suffix
+
+---
+
 ## [0.4.1] — 2026-03-28
 ### Fixed
 - Prompt injection sanitization in `matchWithLLM` — query now passed as JSON field

@@ -24,7 +24,9 @@
     "dist",
     "bin",
     "README.md",
-    "CONTRIBUTING.md"
+    "CONTRIBUTING.md",
+    "CHANGELOG.md",
+    "CODEBASE.md"
   ],
   "scripts": {
     "prebuild":   "node scripts/version.js",

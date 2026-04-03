@@ -226,8 +226,8 @@ export class CapmanEngine {
       }
         
 
-    case 'balanced':
-    default: {
+      case 'balanced':
+      default: {
       const t1 = Date.now()
       const keywordResult = _match(query, this.manifest)
       steps.push({ type: 'keyword_match', status: 'pass', durationMs: Date.now() - t1, detail: `confidence: ${keywordResult.confidence}%` })
@@ -322,7 +322,7 @@ export class CapmanEngine {
 
     const trace: ExecutionTrace = {
       query,
-      candidates: matchResult.candidates ?? [],
+      candidates: matchResult.candidates,
       reasoning,
       steps,
       resolvedVia,
