@@ -103,7 +103,9 @@ Key exports:
   - Injects `auth.userId` into session params automatically
   - Supports `dryRun: true` — returns call plan without executing
   - Retries with `AbortController` timeout on failure
-  - Returns `status` and parsed `data` from API response
+  - - Returns `status` and parsed `data` from API response
+  - `null` and `undefined` params are never written into URLs — skipped silently
+  - Nav param values are URL-encoded via `encodeURIComponent` — matches API resolver behavior
 
 `ResolveOptions`:
 - `baseUrl` — prepended to all API paths

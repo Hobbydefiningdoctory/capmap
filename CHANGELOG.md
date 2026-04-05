@@ -4,7 +4,33 @@ All notable changes to capman are documented here.
 
 ---
 
-## [Unreleased] — v0.4.3
+## [0.4.4] — 2026-04-05
+### Fixed
+- Rate limit double-counting on LLM failure — `recordLLMFailure()` no longer increments `llmCallsThisMinute` (slot already reserved by `checkLLMAllowed()`)
+- Negative `windowResetIn` in rate limit message — recalculates elapsed after window reset
+- Hallucinated capability ID from LLM now correctly returns `out_of_scope` with `confidence: 0` instead of contradictory state
+- `null` params no longer written as literal `"null"` into API URLs or nav targets
+- Empty string `userId` now correctly injected into session params (was skipped by falsy check)
+- `FileCache` and `FileLearningStore` now validate JSON structure before loading — corrupt or unexpected format starts fresh with a warning instead of silently emptying
+- `explain()` privacy check now mirrors `resolve()` exactly — unauthenticated admin access correctly reports "requires authentication" not "requires admin role"
+- `getFlag()` in CLI now errors clearly when a flag is provided without a value (e.g. `--from` with no path)
+- `toSnakeCase()` in parser now strips trailing underscores (e.g. `"__init__"` → `"init"` not `"init_"`)
+- Nav param values now URL-encoded in `resolveNav()` — matches API resolver behavior
+- Removed dead `paramHints` computation in `extractParams()` — was computed but never used
+- `MatchResult` in resolver `No match` test now includes required `candidates: []` field
+- `matchWithLLM` correctly imported in matcher tests
+
+### Tests
+- 73 tests passing (up from 67)
+- Added null param URL tests — API and nav
+- Added nav URL encoding test
+- Added empty string userId injection test
+- Added LLM hallucinated capability ID test
+- Added undefined LLM reasoning graceful handling test
+  
+---
+
+## [0.4.3] — 2026-04-03
 ### Added
 - `CapmanEngine.explain(query)` — explains what would match without executing
   - Returns all candidates with per-candidate human-readable explanations

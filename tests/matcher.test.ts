@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { generate, match } from '../src/index'
+import { generate, match, matchWithLLM } from '../src/index'
 import type { CapmanConfig } from '../src/types'
 
 // ─── Minimal test manifest ────────────────────────────────────────────────────

@@ -126,7 +126,7 @@ describe('resolve()', () => {
   describe('No match', () => {
     it('returns failure when no capability matched', async () => {
       const result = await resolve(
-        { capability: null, confidence: 0, intent: 'out_of_scope', extractedParams: {}, reasoning: 'none' },
+        { capability: null, confidence: 0, intent: 'out_of_scope', extractedParams: {}, reasoning: 'none', candidates: [] },
         {},
         {}
       )
